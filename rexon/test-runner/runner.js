@@ -82,9 +82,14 @@ async function executeTest(tc, isRetry = false) {
 
   try {
     // Execute the generated script dynamically
+    // Strip module.exports/exports lines — not valid in new Function() context
+    const cleanScript = tc.script
+      .replace(/^\s*module\.exports\s*=.*$/gm, '')
+      .replace(/^\s*exports\.\w+\s*=.*$/gm, '');
+
     const scriptFn = new Function(
       'page', 'require', 'console',
-      `return (async () => { ${tc.script} \n return runTest(page); })()`
+      `return (async () => { ${cleanScript} \n return runTest(page); })()`
     );
     await scriptFn(page, require, console);
 
