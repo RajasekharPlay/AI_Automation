@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Wikipedia Search Test",
+    "url": "https://www.wikipedia.org",
+    "steps": [
+      { "action": "navigate", "url": "https://www.wikipedia.org" },
+      { "action": "fill", "selector": "#searchInput", "value": "Playwright testing" },
+      { "action": "click", "selector": "button[type='submit']" },
+      { "action": "expect", "selector": "h1", "condition": "visible" }
+    ]
+  },
+  {
+    "name": "Example.com Title Check",
+    "url": "https://example.com",
+    "steps": [
+      { "action": "navigate", "url": "https://example.com" },
+      { "action": "expect", "selector": "h1", "condition": "visible" },
+      { "action": "expect", "selector": "a", "condition": "visible" }
+    ]
+  },
+  {
+    "name": "Hacker News Load Test",
+    "url": "https://news.ycombinator.com",
+    "steps": [
+      { "action": "navigate", "url": "https://news.ycombinator.com" },
+      { "action": "expect", "selector": ".storylink, .titleline a", "condition": "visible" },
+      { "action": "expect", "selector": "#hnmain", "condition": "visible" }
+    ]
+  }
+]

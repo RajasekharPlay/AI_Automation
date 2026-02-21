@@ -1,0 +1,16 @@
+{
+  "name": "rexon-test-runner",
+  "version": "1.0.0",
+  "main": "runner.js",
+  "scripts": {
+    "start": "node runner.js",
+    "test": "node runner.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@aws-sdk/client-s3": "^3.556.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "@playwright/test": "^1.43.0",
+    "dotenv": "^16.4.0"
+  }
+}

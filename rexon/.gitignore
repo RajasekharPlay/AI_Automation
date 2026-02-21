@@ -1,0 +1,7 @@
+node_modules/
+.env
+dist/
+build/
+*.zip
+/tmp/
+.DS_Store

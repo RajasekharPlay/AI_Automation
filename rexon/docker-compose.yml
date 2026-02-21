@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  test-runner:
+    build: ./test-runner
+    env_file:
+      - ./test-runner/.env
+    volumes:
+      - ./test-runner:/app
+      - /app/node_modules
+    profiles:
+      - runner
