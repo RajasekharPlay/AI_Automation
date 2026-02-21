@@ -82,14 +82,16 @@ async function executeTest(tc, isRetry = false) {
 
   try {
     // Execute the generated script dynamically
-    // Strip module.exports/exports lines — not valid in new Function() context
     const cleanScript = tc.script
-      .replace(/^\s*module\.exports\s*=.*$/gm, '')
-      .replace(/^\s*exports\.\w+\s*=.*$/gm, '');
+      .replace(/^\s*module\.exports\s*=.*$/gm, '')   // strip module.exports
+      .replace(/^\s*exports\.\w+\s*=.*$/gm, '')       // strip named exports
+      .replace(/throw\s*\n\s*/g, 'throw ');            // fix illegal newline after throw
 
+    // Use string concatenation (not template literal) so backticks inside
+    // cleanScript don't break the outer template string
     const scriptFn = new Function(
       'page', 'require', 'console',
-      `return (async () => { ${cleanScript} \n return runTest(page); })()`
+      'return (async () => { ' + cleanScript + '\n return runTest(page); })()'
     );
     await scriptFn(page, require, console);
 
