@@ -136,6 +136,7 @@ async function executeTest(tc, isRetry = false) {
   });
 
   try {
+<<<<<<< HEAD
     const cleanScript = tc.script
       .replace(/^\s*module\.exports\s*=.*$/gm, '')
       .replace(/^\s*exports\.\w+\s*=.*$/gm, '')
@@ -145,6 +146,19 @@ async function executeTest(tc, isRetry = false) {
     const scriptFn = new Function(
       'page', 'require', 'console',
       'return (async () => { ' + cleanScript + '\n return runTest(page, {}); })()'
+=======
+    // Execute the generated script dynamically
+    const cleanScript = tc.script
+      .replace(/^\s*module\.exports\s*=.*$/gm, '')   // strip module.exports
+      .replace(/^\s*exports\.\w+\s*=.*$/gm, '')       // strip named exports
+      .replace(/throw\s*\n\s*/g, 'throw ');            // fix illegal newline after throw
+
+    // Use string concatenation (not template literal) so backticks inside
+    // cleanScript don't break the outer template string
+    const scriptFn = new Function(
+      'page', 'require', 'console',
+      'return (async () => { ' + cleanScript + '\n return runTest(page); })()'
+>>>>>>> 94f6684bf94e3faecaf49369ecfe68005987edac
     );
 
     await appendExecutionLog(tc.id, { event: 'script_executing' });
