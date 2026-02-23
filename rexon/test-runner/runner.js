@@ -1,10 +1,11 @@
 require('dotenv').config();
-const { chromium } = require('@playwright/test');
+const { chromium, devices } = require('@playwright/test');
 const { supabase } = require('./lib/supabase');
 const { uploadToR2 } = require('./lib/r2');
 const { healSelector } = require('./lib/claude');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const RUN_ID = process.env.RUN_ID;
 
@@ -13,10 +14,53 @@ if (!RUN_ID) {
   process.exit(1);
 }
 
+// ── Execution log helpers ─────────────────────────────────────────────────────
+
+async function appendExecutionLog(testCaseId, entry) {
+  try {
+    const { data } = await supabase
+      .from('test_cases')
+      .select('execution_log')
+      .eq('id', testCaseId)
+      .single();
+
+    const log = Array.isArray(data?.execution_log) ? data.execution_log : [];
+    log.push({ ...entry, timestamp: entry.timestamp || new Date().toISOString() });
+
+    await supabase
+      .from('test_cases')
+      .update({ execution_log: log })
+      .eq('id', testCaseId);
+  } catch (err) {
+    console.warn('appendExecutionLog error (non-fatal):', err.message);
+  }
+}
+
+async function appendAiAction(testCaseId, action) {
+  try {
+    const { data } = await supabase
+      .from('test_cases')
+      .select('ai_actions')
+      .eq('id', testCaseId)
+      .single();
+
+    const actions = Array.isArray(data?.ai_actions) ? data.ai_actions : [];
+    actions.push({ ...action, timestamp: action.timestamp || new Date().toISOString() });
+
+    await supabase
+      .from('test_cases')
+      .update({ ai_actions: actions })
+      .eq('id', testCaseId);
+  } catch (err) {
+    console.warn('appendAiAction error (non-fatal):', err.message);
+  }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
 async function main() {
   console.log(`\n🚀 REXON Test Runner starting for run: ${RUN_ID}\n`);
 
-  // Fetch all test cases for this run
   const { data: testCases, error } = await supabase
     .from('test_cases')
     .select('*')
@@ -39,7 +83,6 @@ async function main() {
   let failed = 0;
   let healed = 0;
 
-  // Run tests sequentially
   for (const tc of testCases) {
     console.log(`\n▶ Running: ${tc.name}`);
     const result = await executeTest(tc);
@@ -49,11 +92,11 @@ async function main() {
     else failed++;
   }
 
-  // Update run as completed
   await supabase
     .from('test_runs')
     .update({
       status: 'completed',
+      run_phase: 'completed',
       passed,
       failed,
       healed,
@@ -65,35 +108,86 @@ async function main() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
+// ── Execute a single test case ────────────────────────────────────────────────
+
 async function executeTest(tc, isRetry = false) {
   const startTime = Date.now();
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  const headless = process.env.HEADLESS !== 'false';
+  const browser = await chromium.launch({ headless, slowMo: headless ? 0 : 300 });
 
-  // Start tracing
+  const deviceName = process.env.DEVICE;
+  const deviceConfig = deviceName && devices[deviceName] ? devices[deviceName] : {};
+  const context = await browser.newContext({ ...deviceConfig });
+
   await context.tracing.start({ screenshots: true, snapshots: true });
   const page = await context.newPage();
 
-  // Update status to running
+  // Mark as running
   await supabase
     .from('test_cases')
-    .update({ status: 'running', updated_at: new Date() })
+    .update({ status: 'running', run_phase: 'running', updated_at: new Date() })
     .eq('id', tc.id);
 
+  await appendExecutionLog(tc.id, {
+    event: 'execution_started',
+    isRetry,
+    device: deviceName || 'default',
+    headless
+  });
+
   try {
-    // Execute the generated script dynamically
+    const cleanScript = tc.script
+      .replace(/^\s*module\.exports\s*=.*$/gm, '')
+      .replace(/^\s*exports\.\w+\s*=.*$/gm, '')
+      .replace(/throw\s*\n\s*/g, 'throw ')
+      .replace(/\.click\(\)/g, '.evaluate(el => el.dispatchEvent(new MouseEvent("click", {bubbles:true,cancelable:true})))');
+
     const scriptFn = new Function(
       'page', 'require', 'console',
-      `return (async () => { ${tc.script} \n return runTest(page); })()`
+      'return (async () => { ' + cleanScript + '\n return runTest(page, {}); })()'
     );
+
+    await appendExecutionLog(tc.id, { event: 'script_executing' });
     await scriptFn(page, require, console);
 
     const duration = Date.now() - startTime;
     const status = isRetry ? 'healed' : 'passed';
 
+    await appendExecutionLog(tc.id, { event: 'execution_completed', status, durationMs: duration });
+
+    // Always capture final screenshot on success (shows the passing state)
+    try {
+      const shot = await page.screenshot({ fullPage: true });
+      const shotUrl = await uploadToR2(shot, `${RUN_ID}/${tc.id}/screenshot.png`, 'image/png');
+      await supabase.from('artifacts').insert({
+        test_case_id: tc.id, run_id: RUN_ID, type: 'screenshot', url: shotUrl
+      });
+      await appendExecutionLog(tc.id, { event: 'screenshot_captured', url: shotUrl });
+      console.log(`  📸 Screenshot saved`);
+    } catch (shotErr) {
+      console.warn('  Screenshot error (non-fatal):', shotErr.message);
+    }
+
+    // Always save trace on success too
+    try {
+      const traceDir = path.join(os.tmpdir(), 'rexon-traces', tc.id);
+      fs.mkdirSync(traceDir, { recursive: true });
+      const tracePath = path.join(traceDir, 'trace.zip');
+      await context.tracing.stop({ path: tracePath });
+      const traceBuffer = fs.readFileSync(tracePath);
+      const traceUrl = await uploadToR2(traceBuffer, `${RUN_ID}/${tc.id}/trace.zip`, 'application/zip');
+      await supabase.from('artifacts').insert({
+        test_case_id: tc.id, run_id: RUN_ID, type: 'trace', url: traceUrl
+      });
+      await appendExecutionLog(tc.id, { event: 'trace_captured', url: traceUrl });
+      console.log(`  🔍 Trace saved`);
+    } catch (traceErr) {
+      console.warn('  Trace error (non-fatal):', traceErr.message);
+    }
+
     await supabase
       .from('test_cases')
-      .update({ status, duration_ms: duration, updated_at: new Date() })
+      .update({ status, run_phase: status, duration_ms: duration, updated_at: new Date() })
       .eq('id', tc.id);
 
     console.log(`  ${isRetry ? '🔧 HEALED' : '✅ PASSED'} — ${tc.name} (${duration}ms)`);
@@ -106,6 +200,12 @@ async function executeTest(tc, isRetry = false) {
 
     const duration = Date.now() - startTime;
 
+    await appendExecutionLog(tc.id, {
+      event: 'execution_failed',
+      error: error.message,
+      durationMs: duration
+    });
+
     // Capture screenshot
     let screenshotUrl = null;
     try {
@@ -115,46 +215,55 @@ async function executeTest(tc, isRetry = false) {
         `${RUN_ID}/${tc.id}/screenshot.png`,
         'image/png'
       );
-      console.log(`  📸 Screenshot saved`);
-
       await supabase.from('artifacts').insert({
         test_case_id: tc.id,
         run_id: RUN_ID,
         type: 'screenshot',
         url: screenshotUrl
       });
+      await appendExecutionLog(tc.id, { event: 'screenshot_captured', url: screenshotUrl });
+      console.log(`  📸 Screenshot saved`);
     } catch (screenshotErr) {
       console.error('  Screenshot failed:', screenshotErr.message);
+      await appendExecutionLog(tc.id, { event: 'screenshot_failed', error: screenshotErr.message });
     }
 
     // Capture trace
+    let traceUrl = null;
     try {
-      const traceDir = `/tmp/traces/${tc.id}`;
+      const traceDir = path.join(os.tmpdir(), 'rexon-traces', tc.id);
       fs.mkdirSync(traceDir, { recursive: true });
       const tracePath = path.join(traceDir, 'trace.zip');
       await context.tracing.stop({ path: tracePath });
 
       const traceBuffer = fs.readFileSync(tracePath);
-      const traceUrl = await uploadToR2(
+      traceUrl = await uploadToR2(
         traceBuffer,
         `${RUN_ID}/${tc.id}/trace.zip`,
         'application/zip'
       );
-
       await supabase.from('artifacts').insert({
         test_case_id: tc.id,
         run_id: RUN_ID,
         type: 'trace',
         url: traceUrl
       });
+      await appendExecutionLog(tc.id, { event: 'trace_captured', url: traceUrl });
       console.log(`  🔍 Trace saved`);
     } catch (traceErr) {
       console.error('  Trace capture failed:', traceErr.message);
+      await appendExecutionLog(tc.id, { event: 'trace_failed', error: traceErr.message });
     }
 
-    // If first attempt, try Claude healing
+    // Attempt Claude self-healing (first attempt only)
     if (!isRetry) {
       console.log(`  🤖 Attempting Claude self-healing...`);
+
+      await appendAiAction(tc.id, {
+        action: 'healing_attempt',
+        status: 'started',
+        input: { error: error.message.substring(0, 300) }
+      });
 
       try {
         const dom = await page.content();
@@ -168,7 +277,18 @@ async function executeTest(tc, isRetry = false) {
         if (heal && heal.patchedScript) {
           console.log(`  💡 Heal suggestion: ${heal.reason}`);
 
-          // Save patched script
+          await appendAiAction(tc.id, {
+            action: 'healing_attempt',
+            status: 'completed',
+            output: { newSelector: heal.newSelector || '(see patched script)', reason: heal.reason }
+          });
+
+          await appendExecutionLog(tc.id, {
+            event: 'healing_applied',
+            reason: heal.reason,
+            newSelector: heal.newSelector
+          });
+
           await supabase
             .from('test_cases')
             .update({
@@ -179,14 +299,16 @@ async function executeTest(tc, isRetry = false) {
             .eq('id', tc.id);
 
           await browser.close();
-
-          // Retry with healed script
           return executeTest({ ...tc, script: heal.patchedScript }, true);
         } else {
           console.log(`  ⚠️  Healing agent could not find a fix`);
+          await appendAiAction(tc.id, { action: 'healing_attempt', status: 'no_fix_found' });
+          await appendExecutionLog(tc.id, { event: 'healing_no_fix' });
         }
       } catch (healErr) {
         console.error('  Healing failed:', healErr.message);
+        await appendAiAction(tc.id, { action: 'healing_attempt', status: 'failed', error: healErr.message });
+        await appendExecutionLog(tc.id, { event: 'healing_error', error: healErr.message });
       }
     }
 
@@ -195,6 +317,7 @@ async function executeTest(tc, isRetry = false) {
       .from('test_cases')
       .update({
         status: 'failed',
+        run_phase: 'failed',
         error: error.message,
         duration_ms: duration,
         updated_at: new Date()

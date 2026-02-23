@@ -1,0 +1,6 @@
+# Claude Code internal config — not project code
+.claude/
+
+# Debug / inspection scripts (temporary debugging tools)
+rexon/test-runner/inspect-*.js
+rexon/test-runner/login-debug.png

@@ -6,32 +6,40 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
  * Generate a Playwright test script from a test case definition
  */
 async function generateScript(testCase) {
-  const prompt = `You are a Playwright test automation expert. Generate a complete, runnable Playwright test script in JavaScript (CommonJS) for the following test case.
+  const prompt = `You are a Playwright test automation expert for the Innoveo Skye insurance platform.
+Generate a complete runnable Playwright test script in JavaScript (CommonJS).
 
 Test Case:
 ${JSON.stringify(testCase, null, 2)}
 
+CRITICAL — Skye SPA specifics you MUST follow:
+1. Navigation: ALWAYS use this exact base URL: https://skye1.dev.segurosb.innoveo-skye.net/page/banorteprivate/es/MX/index
+   - Use waitUntil: 'domcontentloaded' and timeout: 60000 on page.goto()
+   - This URL auto-redirects to WS-Fed login. NEVER navigate directly to WS-Fed/idp URLs.
+2. Login selectors (exact, no alternatives):
+   - Username: input[name="username"]   (wait visible, timeout 30000)
+   - Password: input[name="password"]
+   - Login button: button.sk-button     (click via dispatchEvent, see below)
+3. Post-login wait: await page.waitForTimeout(4000) then waitForLoadState('networkidle', {timeout:30000}).catch(()=>{})
+4. Navigation menu: a.sk-nav-menu  (wait visible, then .click())
+5. Zone icons: div[class="sk-nav-content "] li[id="sk-zone-ZONENAME"] i[role="img"]  (click via dispatchEvent)
+6. All clicks MUST use dispatchEvent (NOT .click()):
+   await locator.evaluate(function(el) { el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true})); });
+7. Always add .catch(function(){}) to waitForLoadState calls — they may time out on SPAs
+8. After any navigation/click, wait 2000ms + networkidle before continuing
+9. Login credentials: rajasekhar.udumula+Ap1@innoveo.com / Test@1234
+
 Requirements:
-- Use Playwright's page object
-- Export an async function called "runTest" that accepts (page, testData)
-- Handle waits properly with waitForSelector or waitForLoadState
-- Use data-testid selectors when possible, fall back to semantic selectors
-- Add proper error handling
+- Define async function runTest(page, testData) — no exports
 - Return { passed: true } on success
+- Use exact selectors from the test case steps
+- All timeouts minimum 20000ms for selector waits, 30000ms for critical steps
 
-Return ONLY the JavaScript code, no markdown, no explanation.
-
-Example format:
-async function runTest(page, testData) {
-  await page.goto(testData.url || '${testCase.url || 'https://example.com'}');
-  // ... test steps
-  return { passed: true };
-}
-module.exports = { runTest };`;
+Return ONLY the JavaScript function, no markdown, no explanation.`;
 
   const response = await client.messages.create({
     model: 'claude-opus-4-6',
-    max_tokens: 2000,
+    max_tokens: 8000,
     messages: [{ role: 'user', content: prompt }]
   });
 
@@ -45,7 +53,7 @@ module.exports = { runTest };`;
  * Claude Healing Agent — fixes broken selectors using DOM snapshot
  */
 async function healSelector(failedSelector, domSnapshot, errorMessage, originalScript) {
-  const truncatedDom = domSnapshot.substring(0, 4000);
+  const truncatedDom = domSnapshot.substring(0, 2000);
 
   const prompt = `You are a Playwright self-healing agent. A test failed due to a selector issue.
 
@@ -68,7 +76,7 @@ Analyze the DOM and suggest a fix. Return a JSON object ONLY (no markdown):
   try {
     const response = await client.messages.create({
       model: 'claude-opus-4-6',
-      max_tokens: 2000,
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }]
     });
 

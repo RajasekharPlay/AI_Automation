@@ -1,7 +1,6 @@
 const router = require('express').Router();
 const { supabase } = require('../lib/supabase');
-const { generateScript } = require('../lib/claude');
-const { triggerGithubAction } = require('../lib/github');
+const { startRun } = require('../orchestration/orchestrator');
 
 // GET all runs
 router.get('/', async (req, res) => {
@@ -44,7 +43,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST create new run — upload test cases + generate scripts
+// POST create new run — orchestrates script generation + runner trigger
 router.post('/', async (req, res) => {
   const { name, testCases } = req.body;
 
@@ -53,61 +52,8 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    // 1. Create test run
-    const { data: run, error: runError } = await supabase
-      .from('test_runs')
-      .insert({ name, total: testCases.length, status: 'generating' })
-      .select()
-      .single();
-
-    if (runError) throw runError;
-
-    // Emit to UI immediately
-    global.io?.emit('run-created', run);
-
-    // 2. Generate scripts for each test case (in parallel)
-    const scriptPromises = testCases.map(async (tc) => {
-      try {
-        console.log(`Generating script for: ${tc.name}`);
-        const script = await generateScript(tc);
-        return { ...tc, script, status: 'pending' };
-      } catch (err) {
-        console.error(`Script generation failed for ${tc.name}:`, err.message);
-        return { ...tc, script: null, status: 'failed', error: `Script generation failed: ${err.message}` };
-      }
-    });
-
-    const generatedCases = await Promise.all(scriptPromises);
-
-    // 3. Save test cases to DB
-    const { data: savedCases, error: casesError } = await supabase
-      .from('test_cases')
-      .insert(
-        generatedCases.map((tc) => ({
-          run_id: run.id,
-          name: tc.name,
-          script: tc.script,
-          original_script: tc.script,
-          status: tc.status,
-          error: tc.error || null
-        }))
-      )
-      .select();
-
-    if (casesError) throw casesError;
-
-    // 4. Update run status to 'running'
-    await supabase
-      .from('test_runs')
-      .update({ status: 'running' })
-      .eq('id', run.id);
-
-    // 5. Trigger GitHub Actions
-    await triggerGithubAction(run.id);
-
-    global.io?.to(run.id).emit('run-started', { runId: run.id });
-
-    res.json({ runId: run.id, testCases: savedCases });
+    const result = await startRun({ name, testCases });
+    res.json(result);
   } catch (err) {
     console.error('Create run error:', err);
     res.status(500).json({ error: err.message });
