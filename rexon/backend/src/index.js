@@ -1,4 +1,5 @@
 require('dotenv').config();
+
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
@@ -17,6 +18,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/api/runs', require('./routes/runs'));
 app.use('/api/testcases', require('./routes/testcases'));
 app.use('/api/artifacts', require('./routes/artifacts'));
+app.use('/api/projects', require('./routes/projects'));
+app.use('/api/credentials', require('./routes/credentials'));
+app.use('/api/dom-snapshots', require('./routes/domSnapshots'));
+app.use('/api/testcases-manager', require('./routes/testcasesManager'));
+app.use('/api/chat', require('./routes/chat'));
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

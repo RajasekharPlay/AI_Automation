@@ -74,6 +74,11 @@ async function main() {
 
   if (!testCases || testCases.length === 0) {
     console.error('No test cases found for run:', RUN_ID);
+    await supabase.from('test_runs').update({
+      status: 'failed',
+      run_phase: 'failed',
+      completed_at: new Date()
+    }).eq('id', RUN_ID);
     process.exit(1);
   }
 
@@ -85,6 +90,21 @@ async function main() {
 
   for (const tc of testCases) {
     console.log(`\n▶ Running: ${tc.name}`);
+
+    // Guard: skip test cases where script generation failed (no script stored)
+    if (!tc.script) {
+      console.log(`  ⚠ SKIPPED — no script for "${tc.name}" (generation may have failed)`);
+      await supabase.from('test_cases').update({
+        status: 'failed',
+        run_phase: 'failed',
+        error: 'Script is null — generation failed before runner started',
+        duration_ms: 0,
+        updated_at: new Date()
+      }).eq('id', tc.id);
+      failed++;
+      continue;
+    }
+
     const result = await executeTest(tc);
 
     if (result.status === 'passed') passed++;
@@ -136,17 +156,6 @@ async function executeTest(tc, isRetry = false) {
   });
 
   try {
-<<<<<<< HEAD
-    const cleanScript = tc.script
-      .replace(/^\s*module\.exports\s*=.*$/gm, '')
-      .replace(/^\s*exports\.\w+\s*=.*$/gm, '')
-      .replace(/throw\s*\n\s*/g, 'throw ')
-      .replace(/\.click\(\)/g, '.evaluate(el => el.dispatchEvent(new MouseEvent("click", {bubbles:true,cancelable:true})))');
-
-    const scriptFn = new Function(
-      'page', 'require', 'console',
-      'return (async () => { ' + cleanScript + '\n return runTest(page, {}); })()'
-=======
     // Execute the generated script dynamically
     const cleanScript = tc.script
       .replace(/^\s*module\.exports\s*=.*$/gm, '')   // strip module.exports
@@ -158,7 +167,6 @@ async function executeTest(tc, isRetry = false) {
     const scriptFn = new Function(
       'page', 'require', 'console',
       'return (async () => { ' + cleanScript + '\n return runTest(page); })()'
->>>>>>> 94f6684bf94e3faecaf49369ecfe68005987edac
     );
 
     await appendExecutionLog(tc.id, { event: 'script_executing' });

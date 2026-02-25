@@ -45,14 +45,14 @@ router.get('/:id', async (req, res) => {
 
 // POST create new run — orchestrates script generation + runner trigger
 router.post('/', async (req, res) => {
-  const { name, testCases } = req.body;
+  const { name, testCases, credentialId, projectId, domSnapshotId } = req.body;
 
   if (!name || !testCases || !Array.isArray(testCases) || testCases.length === 0) {
     return res.status(400).json({ error: 'name and testCases array required' });
   }
 
   try {
-    const result = await startRun({ name, testCases });
+    const result = await startRun({ name, testCases, credentialId, projectId, domSnapshotId });
     res.json(result);
   } catch (err) {
     console.error('Create run error:', err);

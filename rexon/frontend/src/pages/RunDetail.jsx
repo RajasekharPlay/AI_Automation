@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTestRun } from '../hooks/useTestRun';
+import Layout from '../components/Layout';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
@@ -267,40 +268,55 @@ export default function RunDetail() {
   const totalDuration = testCases.reduce((sum, tc) => sum + (tc.duration_ms || 0), 0);
   const maxDuration = Math.max(...testCases.map(tc => tc.duration_ms || 0), 1);
 
+  const isFailed = run.status === 'failed';
+  const phase = run.run_phase || run.status;
+
   const workflowSteps = [
-    { n: 1, title: 'Upload Test Cases', desc: 'Received structured test definitions', done: true },
-    { n: 2, title: 'Parse to JSON', desc: 'Validated and normalized test cases', done: true },
-    { n: 3, title: 'Claude → Generate Scripts', desc: 'AI generated Playwright scripts', done: run.status !== 'pending' },
-    { n: 4, title: 'Trigger GitHub Actions', desc: 'Dispatched workflow_dispatch event', done: ['running', 'completed', 'failed'].includes(run.status) },
-    { n: 5, title: 'Execute Playwright', desc: 'Running tests in Chromium headless', done: ['completed', 'failed'].includes(run.status) },
-    { n: 6, title: 'Capture Artifacts', desc: 'Screenshots, traces, logs to R2', done: run.status === 'completed' },
-    { n: 7, title: 'Self-Healing Agent', desc: `Claude healed ${run.healed || 0} failing selectors`, done: run.status === 'completed' },
-    { n: 8, title: 'Results Ready', desc: 'Stream complete — artifacts stored', done: run.status === 'completed' }
+    { n: 1, title: 'Upload Test Cases', desc: 'Received structured test definitions', done: true, failed: false },
+    { n: 2, title: 'Parse to JSON', desc: 'Validated and normalized test cases', done: true, failed: false },
+    { n: 3, title: 'Claude → Generate Scripts', desc: 'AI generated Playwright scripts',
+      done: !['pending', 'creating'].includes(phase),
+      failed: isFailed && ['creating', 'generating'].includes(phase) },
+    { n: 4, title: 'Trigger GitHub Actions', desc: 'Dispatched workflow_dispatch event',
+      done: ['running', 'completed', 'failed'].includes(run.status),
+      failed: isFailed && phase === 'triggering' },
+    { n: 5, title: 'Execute Playwright', desc: 'Running tests in Chromium headless',
+      done: ['completed', 'failed'].includes(run.status),
+      failed: isFailed && ['running'].includes(phase) },
+    { n: 6, title: 'Capture Artifacts', desc: 'Screenshots, traces, logs to R2',
+      done: run.status === 'completed',
+      failed: false },
+    { n: 7, title: 'Self-Healing Agent', desc: `Claude healed ${run.healed || 0} failing selectors`,
+      done: run.status === 'completed',
+      failed: false },
+    { n: 8, title: 'Results Ready', desc: 'Stream complete — artifacts stored',
+      done: run.status === 'completed',
+      failed: false }
   ];
 
   const tabs = ['workflow', 'script', 'results', 'allure', 'terminal'];
 
   return (
-    <div className="min-h-screen bg-[#060d1a] text-slate-200 flex flex-col">
+    <Layout>
       {modalImg && <ScreenshotModal url={modalImg} onClose={() => setModalImg(null)} />}
 
-      {/* Header */}
-      <header className="border-b border-[#1a3050] px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/')} className="text-slate-400 hover:text-white text-xs transition-colors">← BACK</button>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-white text-sm">R</div>
-            <div>
-              <div className="font-bold text-white text-xs tracking-widest">REXON</div>
-              <div className="text-xs text-slate-500">{run.name}</div>
-            </div>
-          </div>
+      {/* Run info bar */}
+      <div className="border-b border-[#1a3050] px-6 py-2 flex items-center justify-between bg-[#060d1a]">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/runs')} className="text-slate-400 hover:text-white text-xs transition-colors">← Runs</button>
+          <span className="text-slate-600">|</span>
+          <span className="text-xs text-white font-medium">{run.name}</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
-          <span className={`w-2 h-2 rounded-full inline-block ${run.status === 'running' ? 'bg-yellow-400 animate-pulse' : run.status === 'completed' ? 'bg-green-400' : 'bg-red-400'}`} />
-          <span className="tracking-wider text-slate-300">{run.status.toUpperCase()}</span>
+          <span className={`w-2 h-2 rounded-full inline-block ${
+            run.status === 'running' || run.status === 'generating' ? 'bg-yellow-400 animate-pulse'
+            : run.status === 'completed' ? 'bg-green-400'
+            : run.status === 'failed' ? 'bg-red-400'
+            : 'bg-slate-400'
+          }`} />
+          <span className="tracking-wider text-slate-300">{run.status?.toUpperCase()}</span>
         </div>
-      </header>
+      </div>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar */}
@@ -365,16 +381,43 @@ export default function RunDetail() {
             {activeTab === 'workflow' && (
               <div className="max-w-2xl">
                 <h3 className="text-xs text-slate-400 tracking-wider mb-6">EXECUTION WORKFLOW</h3>
+
+                {/* Failure banner */}
+                {isFailed && (
+                  <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                    <div className="text-xs text-red-400 font-bold tracking-wider mb-2">RUN FAILED</div>
+                    {testCases.length === 0 ? (
+                      <div className="text-xs text-red-300">
+                        No test cases were found in the database when GitHub Actions ran.
+                        This usually means script generation failed before the runner was triggered.
+                        <br /><span className="text-slate-500 mt-1 block">Try creating a new run — the database schema is now up to date.</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {testCases.filter(tc => tc.status === 'failed').map(tc => (
+                          <div key={tc.id} className="text-xs text-red-300 font-mono">
+                            ✗ {tc.name}{tc.error ? ` — ${tc.error}` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-4">
                   {workflowSteps.map(step => (
                     <div key={step.n} className="flex gap-4 items-start">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                        step.done ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40' : 'bg-[#1a3050] text-slate-500 border border-[#2a4070]'
+                        step.failed ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                        : step.done  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                        : 'bg-[#1a3050] text-slate-500 border border-[#2a4070]'
                       }`}>
-                        {step.done ? '✓' : step.n}
+                        {step.failed ? '✗' : step.done ? '✓' : step.n}
                       </div>
                       <div className="flex-1 pb-4 border-b border-[#1a3050] last:border-0">
-                        <div className={`text-sm font-medium ${step.done ? 'text-white' : 'text-slate-500'}`}>{step.title}</div>
+                        <div className={`text-sm font-medium ${step.failed ? 'text-red-400' : step.done ? 'text-white' : 'text-slate-500'}`}>
+                          {step.title}
+                        </div>
                         <div className="text-xs text-slate-500 mt-0.5">{step.desc}</div>
                       </div>
                     </div>
@@ -901,6 +944,6 @@ export default function RunDetail() {
           </div>
         </div>
       </div>
-    </div>
+    </Layout>
   );
 }
