@@ -155,6 +155,9 @@ async function executeTest(tc, isRetry = false) {
     headless
   });
 
+  // Extract testData from the stored test plan JSON
+  const testData = tc.test_plan_json?.testData || tc.test_plan_json || {};
+
   try {
     // Execute the generated script dynamically
     const cleanScript = tc.script
@@ -165,12 +168,12 @@ async function executeTest(tc, isRetry = false) {
     // Use string concatenation (not template literal) so backticks inside
     // cleanScript don't break the outer template string
     const scriptFn = new Function(
-      'page', 'require', 'console',
-      'return (async () => { ' + cleanScript + '\n return runTest(page); })()'
+      'page', 'testData', 'require', 'console',
+      'return (async () => { ' + cleanScript + '\n return runTest(page, testData); })()'
     );
 
     await appendExecutionLog(tc.id, { event: 'script_executing' });
-    await scriptFn(page, require, console);
+    await scriptFn(page, testData, require, console);
 
     const duration = Date.now() - startTime;
     const status = isRetry ? 'healed' : 'passed';
