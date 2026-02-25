@@ -37,6 +37,7 @@ jobs:
           CLOUDFLARE_R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
           CLOUDFLARE_R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          DEVICE: iPhone 12
         run: node runner.js
 
       - name: Upload trace artifacts to GitHub (backup)

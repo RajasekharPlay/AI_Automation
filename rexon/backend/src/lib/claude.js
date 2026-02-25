@@ -32,12 +32,18 @@ CRITICAL — SPA specifics you MUST follow:
    - Password selector: input[name="password"]
    - Login button: button.sk-button     (click via dispatchEvent)
 3. Post-login wait: await page.waitForTimeout(4000) then waitForLoadState('networkidle', {timeout:30000}).catch(()=>{})
-4. Navigation menu: a.sk-nav-menu
-5. Zone icons: div[class="sk-nav-content "] li[id="sk-zone-ZONENAME"] i[role="img"]  (click via dispatchEvent)
+4. Navigation menu: a.sk-nav-menu  — use page.waitForSelector('a.sk-nav-menu', {state:'visible', timeout:20000})
+5. Zone icons: div[class="sk-nav-content "] li[id="sk-zone-ZONENAME"] i[role="img"]
+   CRITICAL — zone icons MUST use this exact pattern (page.waitForSelector, NOT locator.waitFor):
+     var zoneSel = 'div[class="sk-nav-content "] li[id="sk-zone-ZONENAME"] i[role="img"]';
+     await page.waitForSelector(zoneSel, { state: 'visible', timeout: 15000 });
+     await page.locator(zoneSel).first().evaluate(function(el) { el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true})); });
+   The zone li has multiple i[role="img"] elements — page.waitForSelector finds the VISIBLE one, .first() avoids strict mode errors.
 6. ALL clicks MUST use dispatchEvent (NOT .click()):
    await locator.evaluate(function(el) { el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true})); });
 7. Always add .catch(function(){}) to waitForLoadState calls
 8. After any navigation/click, wait 2000ms + networkidle before continuing
+9. Device: iPhone 12 is used — mobile layout. The nav sidebar is mobile-style.
 
 STRICT SELECTOR RULES — NEVER VIOLATE THESE:
 - NEVER write comma-separated selectors like: 'input[name="username"], input[type="email"], #username'
