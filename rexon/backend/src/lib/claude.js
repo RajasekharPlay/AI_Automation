@@ -44,6 +44,15 @@ CRITICAL — SPA specifics you MUST follow:
 7. Always add .catch(function(){}) to waitForLoadState calls
 8. After any navigation/click, wait 2000ms + networkidle before continuing
 9. Device: iPhone 12 is used — mobile layout. The nav sidebar is mobile-style.
+10. Pet/Mascota zone — CRITICAL TAB VERIFICATION RULE:
+    - The 3 coverage tabs (Coberturas base, Servicios, Exclusiones) appear on the "Ver seguro" page (PetInfoPageProccess).
+    - After clicking "Ver seguro", verify the tabs IMMEDIATELY — do NOT click "Cotizar" before verifying tabs.
+    - Clicking "Cotizar" navigates AWAY from the tab page to a quote form — tabs will NOT be visible there.
+    - Correct tab selectors (use EXACTLY these, not text= shorthand):
+        await page.waitForSelector('li.sk-tab:has-text("Coberturas base")', { state: 'visible', timeout: 20000 });
+        await page.waitForSelector('li.sk-tab:has-text("Servicios")', { state: 'visible', timeout: 10000 });
+        await page.waitForSelector('li.sk-tab:has-text("Exclusiones")', { state: 'visible', timeout: 10000 });
+    - If the test case steps include a "Cotizar" click followed by tab verification, REORDER to verify tabs first, then click Cotizar.
 
 STRICT SELECTOR RULES — NEVER VIOLATE THESE:
 - NEVER write comma-separated selectors like: 'input[name="username"], input[type="email"], #username'
@@ -102,7 +111,7 @@ Analyze the DOM and suggest a fix. Return a JSON object ONLY (no markdown):
   try {
     const response = await client.messages.create({
       model: 'claude-opus-4-6',
-      max_tokens: 4000,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }]
     });
 
